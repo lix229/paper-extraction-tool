@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Paper Extraction</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script type="module" src="/static/app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <button id="toggle-list" type="button" aria-expanded="false" aria-controls="sidebar">Papers</button>
+    <div class="pager">
+      <button id="prev" type="button" aria-label="Previous paper">‹</button>
+      <span id="position" aria-live="polite"></span>
+      <button id="next" type="button" aria-label="Next paper">›</button>
+    </div>
+    <div id="save-state" class="save-state" role="status" aria-live="polite"></div>
+    <div class="spacer"></div>
+    <button id="fetch-missing" type="button">Fetch missing PDFs</button>
+    <button id="export" type="button">Export CSV</button>
+    <button id="reviewer" type="button">Reviewer</button>
+  </header>
+
+  <div class="workspace">
+    <aside id="sidebar" hidden>
+      <div class="list-tools">
+        <input id="search" type="search" placeholder="Search title, author, ID, DOI" aria-label="Search papers">
+        <select id="filter" aria-label="Filter papers">
+          <option value="all">All papers</option>
+          <option>Not started</option>
+          <option>In progress</option>
+          <option>Needs review</option>
+          <option>Complete</option>
+          <option value="no-pdf">No PDF</option>
+          <option value="check-match">Check match</option>
+        </select>
+        <div id="list-count" class="muted"></div>
+      </div>
+      <ul id="paper-list"></ul>
+    </aside>
+
+    <main id="split">
+      <section id="viewer-pane" aria-label="Paper">
+        <div id="paper-head"></div>
+        <div id="file-tabs"></div>
+        <div id="viewer-stage"></div>
+      </section>
+      <div id="splitter" role="separator" aria-orientation="vertical" aria-label="Resize panes" tabindex="0"></div>
+      <section id="form-pane" aria-label="Extraction form">
+        <div id="form-head">
+          <div class="status-row">
+            <div id="status" role="group" aria-label="Extraction status"></div>
+            <div id="record-meta" class="muted"></div>
+          </div>
+          <nav id="section-nav" aria-label="Form sections"></nav>
+        </div>
+        <div id="form-scroll">
+          <div id="screening"></div>
+          <div id="form-body"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="drag-shield" hidden></div>
+  <div id="modal-root"></div>
+  <div id="toasts" aria-live="polite"></div>
+</body>
+</html>

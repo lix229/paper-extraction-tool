@@ -1,0 +1,20 @@
+[
+  {"cond": null, "values": {}, "expect": true},
+  {"cond": {"field": "a", "is": "x"}, "values": {"a": "x"}, "expect": true},
+  {"cond": {"field": "a", "is": "x"}, "values": {"a": "y"}, "expect": false},
+  {"cond": {"field": "a", "is": "x"}, "values": {}, "expect": false},
+  {"cond": {"field": "a", "is": "x"}, "values": {"a": ["y", "x"]}, "expect": true},
+  {"cond": {"field": "a", "in": ["x", "z"]}, "values": {"a": "z"}, "expect": true},
+  {"cond": {"field": "a", "in": ["x", "z"]}, "values": {"a": ["y"]}, "expect": false},
+  {"cond": {"field": "a", "in": ["x", "z"]}, "values": {"a": ["y", "z"]}, "expect": true},
+  {"cond": {"field": "a", "filled": true}, "values": {"a": []}, "expect": false},
+  {"cond": {"field": "a", "filled": true}, "values": {"a": 0}, "expect": true},
+  {"cond": {"field": "a", "filled": false}, "values": {"a": ""}, "expect": true},
+  {"cond": {"all": [{"field": "a", "is": "x"}, {"field": "b", "is": "y"}]}, "values": {"a": "x", "b": "y"}, "expect": true},
+  {"cond": {"all": [{"field": "a", "is": "x"}, {"field": "b", "is": "y"}]}, "values": {"a": "x"}, "expect": false},
+  {"cond": {"any": [{"field": "a", "is": "x"}, {"field": "b", "is": "y"}]}, "values": {"b": "y"}, "expect": true},
+  {"cond": {"any": []}, "values": {}, "expect": false},
+  {"cond": {"all": []}, "values": {}, "expect": true},
+  {"cond": {"not": {"field": "a", "is": "x"}}, "values": {"a": "x"}, "expect": false},
+  {"cond": {"not": {"field": "a", "is": "x"}}, "values": {}, "expect": true}
+]

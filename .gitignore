@@ -1,0 +1,5 @@
+# cached papers (copyrighted) and extraction records
+data/
+__pycache__/
+.pytest_cache/
+.DS_Store

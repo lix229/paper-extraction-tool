@@ -1,0 +1,692 @@
+# Extraction form. Edit and reload the page to apply; errors are listed on the page.
+#
+# Field ids are the keys in saved records and the CSV column names. Labels,
+# help text and order can change freely. Renaming an id or an option leaves
+# values saved under the old name; the form lists them so they can be moved.
+# Bump `version` when you change ids or options; each record stores it.
+#
+# Field types
+#   select, multiselect   need `options`
+#   text, textarea, number
+#   group                 repeatable items with their own `fields`; `prefix`
+#                         makes item codes (C1, C2…), `summary` lists the item
+#                         fields shown in its title
+#   ref                   links to items of a group: `group: <group id>`,
+#                         `multiple: true` for several
+# Field settings
+#   other: true           adds "Other" and a specify box (saved as <id>_other)
+#   missing: [...]        missing-value buttons, kept apart from the options;
+#                         defaults to missing_default; [] for none
+#   show_if: <condition>  shown only when true; hidden values are kept but
+#                         export blank
+#   required: true | <condition>   checked when the paper is marked Complete
+#   screening_hint: <column>       shows the workbook's screening value
+#   evidence: true        "Use page" / "Go to" buttons tied to the PDF viewer
+#   quote: true           "Insert selection" adds a labelled quotation
+# Conditions
+#   {field: id, is: value}   {field: id, in: [values]}   {field: id, filled: true}
+#   {all: [...]}  {any: [...]}  {not: ...}  or a name from `conditions`.
+#   For multiselects, is/in match when any selected value matches. Inside a
+#   group, conditions can also use the item's own fields.
+
+version: 1
+title: Healthcare AI extraction form
+missing_default: [Not reported, Unclear, Not applicable]
+
+conditions:
+  included: {field: decision, in: [Include, Uncertain—needs discussion]}
+  research:
+    all:
+      - included
+      - any:
+          - {field: aspect_primary, is: Research}
+          - {field: aspect_additional, is: Research}
+          - {field: study_activity, in: [Development, Adaptation, Technical evaluation]}
+  adoption:
+    all:
+      - included
+      - any:
+          - {field: aspect_primary, is: "Translation & Adoption"}
+          - {field: aspect_additional, is: "Translation & Adoption"}
+          - {field: study_activity, in: [Acceptance or co-design, Implementation evaluation, Clinical impact evaluation]}
+  governance:
+    all:
+      - included
+      - any:
+          - {field: aspect_primary, is: "System & Governance"}
+          - {field: aspect_additional, is: "System & Governance"}
+          - {field: study_activity, is: Policy or system analysis}
+  research_or_adoption: {any: [research, adoption]}
+  empirical:
+    all:
+      - included
+      - {field: study_design, in: [Observational quantitative, Interventional, Qualitative, Mixed methods]}
+
+sections:
+  - id: eligibility
+    title: Eligibility
+    help: >
+      Confirm eligibility first; the extraction sections appear once the paper is
+      included or marked uncertain. Excluded papers need only a decision, reason
+      and any relevant notes.
+    fields:
+      - id: decision
+        label: Extraction decision
+        type: select
+        options: [Include, Exclude, Uncertain—needs discussion]
+        missing: []
+        required: true
+        screening_hint: decision
+      - id: exclusion_reason
+        label: Exclusion reason
+        type: select
+        options:
+          - Outside healthcare AI
+          - Outside UK–US scope
+          - Outside review aspects
+          - Ineligible publication type
+          - Duplicate
+        other: true
+        missing: []
+        show_if: {field: decision, is: Exclude}
+        required: true
+
+  - id: classification
+    title: Classification
+    show_if: included
+    help: >
+      Show fields according to the paper's content, not only its review-aspect
+      label. Existing-model use and acceptance/co-design studies can qualify
+      without model development or deployment. Stage evaluated is recorded per
+      country/context in the next section.
+    fields:
+      - id: aspect_primary
+        label: Primary review aspect
+        type: select
+        options: &aspects [Research, "Translation & Adoption", "System & Governance"]
+        missing: []
+        required: true
+        screening_hint: review_aspect
+      - id: aspect_additional
+        label: Additional review aspects
+        type: multiselect
+        options: *aspects
+        missing: []
+      - id: publication_type
+        label: Publication type
+        type: select
+        options:
+          - Original research
+          - Review or evidence synthesis
+          - Commentary
+          - Policy
+          - Guideline or framework
+        other: true
+        missing: [Unclear]
+        required: true
+        screening_hint: publication_type
+        help: Confirm the imported label.
+      - id: study_design
+        label: Study design
+        type: select
+        options:
+          - Observational quantitative
+          - Interventional
+          - Qualitative
+          - Mixed methods
+          - Evidence synthesis
+          - Policy or document analysis
+          - Bibliometric
+        other: true
+        missing: [Unclear]
+        required: true
+      - id: study_timing
+        label: Study timing
+        type: select
+        options: [Retrospective, Prospective, Both]
+        show_if: empirical
+      - id: clinical_specialty
+        label: Clinical specialty
+        type: multiselect
+        help: Structured tag; use these names consistently and Other for anything else.
+        options:
+          - Radiology/imaging
+          - Oncology
+          - Cardiology
+          - Neurology
+          - Mental health/psychiatry
+          - Primary care/general practice
+          - Emergency medicine
+          - Critical care
+          - Surgery
+          - Ophthalmology
+          - Dermatology
+          - Pathology/laboratory medicine
+          - Gastroenterology
+          - Endocrinology/diabetes
+          - Obstetrics and gynaecology
+          - Paediatrics
+          - Infectious disease
+          - Respiratory medicine
+          - Musculoskeletal/orthopaedics
+          - Multiple specialties
+          - Not specialty-specific
+        other: true
+      - id: clinical_setting
+        label: Population and setting
+        type: textarea
+        help: Short description of the population and care setting.
+      - id: intended_users
+        label: Intended users
+        type: multiselect
+        options:
+          - Clinicians
+          - Patients
+          - Unpaid carers
+          - Administrators
+          - Researchers
+          - System or policy stakeholders
+        other: true
+      - id: application_task
+        label: Application/task
+        type: multiselect
+        options: &applications
+          - Diagnosis
+          - Prediction
+          - Decision support
+          - Triage
+          - Documentation or summarisation
+          - Communication or chatbot
+          - Patient/carer support and signposting
+          - Administration
+        other: true
+      - id: technology
+        label: Technology
+        type: multiselect
+        help: Non-exclusive tags.
+        options:
+          - LLM
+          - Vision-language or multimodal model
+          - Other generative AI
+          - Other AI or machine learning
+          - AI broadly discussed
+      - id: study_activity
+        label: Study activity
+        type: multiselect
+        options:
+          - Development
+          - Adaptation
+          - Technical evaluation
+          - Acceptance or co-design
+          - Implementation evaluation
+          - Clinical impact evaluation
+          - Policy or system analysis
+        other: true
+        required: true
+      - id: uk_us_comparison
+        label: Direct UK–US comparison
+        type: select
+        options: ["Yes", "No"]
+        missing: [Unclear]
+        required: true
+        help: The presence of both countries alone is insufficient.
+
+  - id: country_context
+    title: Country and context
+    show_if: included
+    help: >
+      Assign country from data, deployment, participants or policy
+      jurisdiction—not affiliation or vendor location. External validation does
+      not establish deployment. Add a context for each country, application,
+      setting or evaluated stage, and link datasets, policies and findings to it.
+      Governance sources use the policy/system jurisdiction.
+    fields:
+      - id: contexts
+        label: Contexts
+        type: group
+        prefix: C
+        item_label: context
+        summary: [country, label]
+        fields:
+          - id: label
+            label: Context label
+            type: text
+            placeholder: e.g. NHS trust pilot, MIMIC-IV evaluation
+            missing: []
+          - id: country
+            label: Country
+            type: select
+            options: [UK, US]
+            other: true
+            required: true
+          - id: country_role
+            label: Country role
+            type: multiselect
+            options:
+              - Development data
+              - Evaluation data
+              - Clinical deployment
+              - Participant or stakeholder study
+              - Policy or system context
+            other: true
+            required: true
+          - id: applications
+            label: Application/task
+            type: multiselect
+            options: *applications
+            other: true
+          - id: stage
+            label: Stage evaluated
+            type: select
+            show_if: research_or_adoption
+            help: Use the acceptance/co-design stage only when deployment was not evaluated.
+            options:
+              - Acceptance/co-design only; deployment not evaluated
+              - Development or offline evaluation
+              - Prospective silent evaluation
+              - Live pilot
+              - Routine use
+              - Scale-up across sites
+          - id: description
+            label: Context description
+            type: textarea
+            help: Dataset/study label, organization or setting, and why the country applies.
+          - id: evidence
+            label: Evidence location
+            type: text
+            evidence: true
+            missing: []
+            required: {field: country, in: [UK, US, Other]}
+            help: Page, section, table, appendix or source URL; required for a confirmed country.
+
+  - id: research
+    title: Research
+    show_if: research_or_adoption
+    help: >
+      Model and dataset fields are also available to adoption studies. Record
+      performance in Findings. Dataset role, modality, sample size, sites and
+      validation belong to each dataset.
+    fields:
+      - id: institutions
+        label: Participating institutions
+        type: textarea
+        show_if: research
+        help: Named organizations; use consistent names.
+      - id: collaboration_sectors
+        label: Collaboration sectors
+        type: multiselect
+        show_if: research
+        options: [Academic, Healthcare provider, Industry, Government, Charity or nonprofit]
+        other: true
+      - id: funding_sectors
+        label: Funding sectors
+        type: multiselect
+        show_if: research
+        options:
+          - Government/public
+          - Academic or institutional
+          - Industry
+          - Charity or nonprofit
+          - No external funding stated
+        other: true
+      - id: industry_involvement
+        label: Industry involvement
+        type: multiselect
+        show_if: research
+        options:
+          - None explicitly stated
+          - Funding
+          - Model or software provision
+          - Data or infrastructure
+          - Study collaboration
+        other: true
+      - id: models
+        label: Models/tools
+        type: group
+        prefix: M
+        item_label: model
+        summary: [name]
+        fields:
+          - id: name
+            label: Name and version
+            type: text
+            missing: []
+          - id: use
+            label: Use
+            type: multiselect
+            options:
+              - Existing model
+              - Prompt design
+              - Retrieval augmentation
+              - Fine-tuning
+              - New model training
+            other: true
+      - id: datasets
+        label: Datasets/sources
+        type: group
+        prefix: D
+        item_label: dataset
+        summary: [name]
+        fields:
+          - id: name
+            label: Dataset/source
+            type: text
+            missing: []
+          - id: dataset_contexts
+            label: Country/context
+            type: ref
+            group: contexts
+            multiple: true
+          - id: population
+            label: Population
+            type: text
+            help: Only if different from the clinical context.
+            missing: []
+          - id: role
+            label: Dataset role
+            type: select
+            options: [Development, Internal evaluation, External evaluation, Participant study]
+            other: true
+          - id: modality
+            label: Data modality
+            type: multiselect
+            options:
+              - Clinical text
+              - Structured clinical data
+              - Images
+              - Audio
+              - Signals
+              - Genomics
+              - Survey or interview
+              - Policy or administrative records
+            other: true
+          - id: sample_size
+            label: Sample size
+            type: number
+          - id: sample_unit
+            label: Sample unit
+            type: select
+            options: [Patients, Participants, Images, Notes, Encounters, Records]
+            other: true
+            missing: []
+          - id: sample_detail
+            label: Subsets
+            type: text
+            missing: []
+            help: Identify subsets, e.g. 800 train / 200 test.
+          - id: sites
+            label: Sites
+            type: select
+            options: [Single centre, Multicentre]
+          - id: sites_detail
+            label: Site details
+            type: text
+            missing: []
+          - id: validation
+            label: Validation
+            type: select
+            options: [Internal, External, Both, Explicitly none]
+          - id: validation_detail
+            label: Independent evaluation data
+            type: text
+            missing: []
+      - id: reporting_guideline
+        label: Reporting guideline
+        type: text
+        show_if: research
+        missing: [Explicitly none, Not reported]
+      - id: data_availability
+        label: Data availability
+        type: select
+        show_if: research
+        options: &availability [Public, Restricted or licensed, On request, Unavailable, Not reported, Not applicable]
+        missing: []
+      - id: code_availability
+        label: Code availability
+        type: select
+        show_if: research
+        options: *availability
+        missing: []
+      - id: model_availability
+        label: Model availability
+        type: select
+        show_if: research
+        options: *availability
+        missing: []
+      - id: resource_links
+        label: Resource links
+        type: text
+        show_if: research
+        missing: []
+
+  - id: adoption
+    title: Translation and adoption
+    show_if: adoption
+    help: >
+      Use the Stage evaluated field in each context. Put stage evidence, uptake,
+      trust, usability and other measured outcomes in Findings.
+    fields:
+      - id: workflow_integration
+        label: Workflow integration
+        type: select
+        options: [Explicitly none, Simulated workflow, Live integration]
+      - id: ehr_integration
+        label: EHR integration
+        type: select
+        options: ["Yes", "No"]
+      - id: stakeholder_involvement
+        label: Stakeholder involvement
+        type: textarea
+        help: Who participated and how — consultation, co-design, testing, training or routine use.
+      - id: training_support
+        label: Training/support
+        type: textarea
+        help: What was delivered, to whom, and whether it was evaluated.
+      - id: human_oversight
+        label: Human oversight
+        type: select
+        options:
+          - Review of each output
+          - Supervisory or exception review
+          - Autonomous use explicitly reported
+        other: true
+      - id: sustainability
+        label: Sustainability
+        type: textarea
+        help: Duration, maintenance, resources, continued use or discontinuation; distinguish observed from planned.
+
+  - id: governance
+    title: System and governance
+    show_if: governance
+    help: >
+      Authority and status belong to the cited policy, not automatically to the
+      article. Record system explanations, barriers and facilitators in Findings;
+      date policy claims to the source.
+    fields:
+      - id: topics
+        label: Topics
+        type: multiselect
+        options:
+          - System structure
+          - Data infrastructure
+          - EHR ecosystem
+          - Academic–clinical–industry relationships
+          - Funding
+          - Commercialisation
+          - Procurement
+          - Regulatory pathways
+          - Privacy/data governance
+          - Safety
+          - Equity or bias
+          - Accountability
+          - Transparency
+          - Human oversight
+          - Monitoring
+        other: true
+      - id: policies
+        label: Policies/frameworks
+        type: group
+        prefix: P
+        item_label: policy
+        summary: [name]
+        fields:
+          - id: name
+            label: Policy/framework
+            type: text
+            missing: []
+          - id: issuing_body
+            label: Issuing body
+            type: text
+          - id: date_version
+            label: Date/version
+            type: text
+          - id: policy_contexts
+            label: Country/context
+            type: ref
+            group: contexts
+            multiple: true
+          - id: authority
+            label: Source authority
+            type: select
+            options: [Law, Regulation, Official guidance, Professional recommendation, Author analysis]
+            other: true
+            missing: [Unclear]
+          - id: policy_status
+            label: Policy status
+            type: select
+            options:
+              - Current at study time
+              - Proposed or draft
+              - Historical or superseded
+              - Not reported
+              - Unclear
+              - Not applicable
+            missing: []
+
+  - id: findings_evidence
+    title: Findings and evidence
+    show_if: included
+    help: >
+      Add one finding per distinct result or explanation. Record the main result
+      for every evaluated outcome domain, including no improvement or harm.
+      Technical performance is not a patient outcome. Keep separate findings
+      when countries, results or comparators differ.
+    fields:
+      - id: findings
+        label: Findings
+        type: group
+        prefix: F
+        item_label: finding
+        summary: [type, domain]
+        fields:
+          - id: type
+            label: Type
+            type: select
+            options:
+              - Result
+              - Barrier
+              - Facilitator
+              - Both barrier and facilitator
+              - System explanation
+              - Recommendation
+            other: true
+            missing: []
+            required: true
+          - id: domain
+            label: Domain
+            type: select
+            options:
+              - Technical performance
+              - Workflow/productivity
+              - Clinician workload
+              - Patient outcomes
+              - Safety
+              - Equity
+              - Economic/cost-effectiveness
+              - Usability/trust/acceptance
+              - Uptake/adoption/sustained use
+              - Relevant system/governance topic
+            other: true
+            missing: []
+            required: true
+          - id: finding_context
+            label: Country/context
+            type: ref
+            group: contexts
+            required: true
+          - id: finding_datasets
+            label: Datasets
+            type: ref
+            group: datasets
+            multiple: true
+            show_if: research_or_adoption
+          - id: finding_models
+            label: Models
+            type: ref
+            group: models
+            multiple: true
+            show_if: research_or_adoption
+          - id: link_note
+            label: Other link
+            type: text
+            missing: []
+            help: Stakeholder group, jurisdiction or other link not covered above.
+          - id: finding
+            label: Reported finding
+            type: textarea
+            quote: true
+            missing: []
+            required: true
+            help: >
+              Concise summary with metric, result, units, denominator,
+              uncertainty, comparator and time point where applicable. Optional
+              quotations must be labelled.
+          - id: evidence_nature
+            label: Evidence nature
+            type: select
+            options: [Observed, Simulated, Self-reported]
+            missing: [Not applicable]
+          - id: basis
+            label: Evidence basis
+            type: select
+            options:
+              - Empirical result
+              - Evidence synthesis
+              - Policy or legal provision
+              - Author interpretation or recommendation
+            missing: []
+            required: true
+          - id: location
+            label: Evidence location
+            type: text
+            evidence: true
+            missing: []
+            required: true
+            help: Page, section, table, figure or source URL.
+
+  - id: review
+    title: Review and completion
+    help: >
+      Complete means the decision and relevant sections have been reviewed, with
+      country and finding evidence locations recorded; optional fields need not
+      be filled.
+    fields:
+      - id: limitations_author
+        label: Author-reported limitations
+        type: textarea
+        show_if: included
+      - id: limitations_reviewer
+        label: Reviewer concerns
+        type: textarea
+        show_if: included
+        missing: []
+      - id: related_reports
+        label: Related reports
+        type: text
+        missing: []
+        help: Flag related publications to avoid double counting.
+      - id: notes
+        label: Notes/uncertainty
+        type: textarea
+        missing: []
+        help: Explain changed or borderline decisions, or unresolved questions.
