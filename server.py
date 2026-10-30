@@ -5,19 +5,15 @@
     python3 server.py --port 9000 --data-dir /tmp/test-data
 
 Settings live in config.yaml; the form is defined in form.yaml (re-read on every
-page load). The Semantic Scholar key is read from the environment variable named
-in config.yaml and never sent to the browser.
+page load). Publication details and PDFs are read from the papers directory.
 """
 import argparse
 import json
 import mimetypes
 import os
 import re
-import threading
 import traceback
-from collections import defaultdict
 from datetime import datetime
-from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
@@ -27,7 +23,6 @@ import yaml
 from export import codebook_csv, export_csv
 from formconfig import ConfigError, load_form_config
 from papers import load_papers
-from s2 import FetchError, S2Client, S2Error, download_pdf, now, parse_identifier, resolve
 from store import Conflict, InvalidPdf, Store
 
 ROOT = Path(__file__).resolve().parent
@@ -51,18 +46,12 @@ class App:
         base = self.config_path.parent
         cfg = yaml.safe_load(self.config_path.read_text('utf-8'))
         p = cfg['papers']
-        self.screening_columns = p.get('screening', [])
-        self.papers = load_papers(base / p['file'], p['sheet'], p['columns'], self.screening_columns)
+        self.papers = load_papers(base / p['manifest'])
         self.by_id = {paper['record_id']: paper for paper in self.papers}
         self.form_path = base / cfg.get('form', 'form.yaml')
-        self.store = Store(Path(data_dir) if data_dir else base / cfg.get('data_dir', 'data'))
-        s2cfg = cfg.get('semantic_scholar', {})
-        key_env = s2cfg.get('api_key_env', 'SEMANTIC_SCHOLAR_API_KEY')
-        self.has_key = bool(os.environ.get(key_env))
-        self.s2 = S2Client(os.environ.get(key_env), float(s2cfg.get('min_interval', 1.1)))
-        self.download_timeout = float(s2cfg.get('download_timeout', 30))
+        self.store = Store(Path(data_dir) if data_dir else base / cfg.get('data_dir', 'data'),
+                           base / p.get('directory', 'papers'), self.papers)
         self.server_cfg = cfg.get('server', {})
-        self._paper_locks = defaultdict(threading.Lock)
 
     def paper(self, rid):
         if rid not in self.by_id:
@@ -75,119 +64,29 @@ class App:
         except ConfigError as exc:
             raise HttpError(422, 'form.yaml has errors', {'errors': exc.errors})
 
-    # paper state
-
     def pdf_state(self, rid):
         info = self.store.pdf_info(rid)
-        error = None if info else self.store.fetch_error(rid)
+        error = None if info else {'reason': 'The PDF is missing. Add a copy below.'}
         return {'available': bool(info), **(info or {}), 'error': error}
 
     def summary(self, paper):
         rid = paper['record_id']
         record = self.store.record(rid) or {}
-        match = self.store.match(rid) or {}
         pdf = self.pdf_state(rid)
-        if pdf['available']:
-            pdf_flag = 'manual' if pdf.get('origin') == 'manual' else 'cached'
-        else:
-            pdf_flag = 'failed' if pdf['error'] else 'none'
         return {
             'record_id': rid, 'title': paper['title'], 'authors': paper['authors'], 'year': paper['year'],
-            'source_label': paper['source']['label'], 'aspect': paper['screening'].get('review_aspect', ''),
+            'source_label': paper['source']['label'],
             'status': record.get('status', 'Not started'), 'updated_at': record.get('updated_at'),
-            'pdf': pdf_flag, 'match': match.get('status'),
-            'match_unconfirmed': match.get('status') == 'matched' and not match.get('confirmed'),
+            'pdf': 'available' if pdf['available'] else 'missing',
         }
 
     def detail(self, rid):
         paper = self.paper(rid)
         return {
-            'paper': paper,
-            'match': self.store.match(rid),
-            'pdf': self.pdf_state(rid),
+            'paper': paper, 'pdf': self.pdf_state(rid),
             'supplements': self.store.supplements(rid),
-            'record': self.store.record(rid),
-            'summary': self.summary(paper),
-            's2_key_rejected': self.s2.key_rejected,
+            'record': self.store.record(rid), 'summary': self.summary(paper),
         }
-
-    def fetch(self, rid, retry=False):
-        """Resolve the paper and download its open-access PDF unless it is cached.
-
-        A definite failure (no open-access link, publisher refused) is remembered
-        and not retried unless `retry`; Semantic Scholar outages are always retried.
-        """
-        paper = self.paper(rid)
-        with self._paper_locks[rid]:
-            if self.store.pdf_info(rid):
-                return self.detail(rid)
-            error = self.store.fetch_error(rid)
-            if error and not error.get('transient') and not retry:
-                return self.detail(rid)
-            match = self.store.match(rid)
-            try:
-                if match is None or (retry and match.get('status') == 'not_found'):
-                    match = resolve(self.s2, paper)
-                    self.store.set_match(rid, match)
-            except S2Error as exc:
-                self.store.set_fetch_error(rid, {'reason': str(exc), 'transient': True})
-                return self.detail(rid)
-            self._download(rid, match)
-        return self.detail(rid)
-
-    def _download(self, rid, match):
-        if match.get('status') == 'none':
-            self.store.set_fetch_error(rid, {'reason': 'Marked as not in Semantic Scholar.'})
-            return
-        if match.get('status') != 'matched':
-            self.store.set_fetch_error(rid, {'reason': 'Not found in Semantic Scholar (tried: '
-                                             + ', '.join(match.get('tried', [])) + ').'})
-            return
-        oa = match['paper'].get('openAccessPdf') or {}
-        if not oa.get('url'):
-            status = f' (status: {oa["status"]})' if oa.get('status') else ''
-            self.store.set_fetch_error(rid, {'reason': f'Semantic Scholar lists no open-access PDF{status}.'})
-            return
-        dest = self.store.pdf_path(rid)
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            info = download_pdf(oa['url'], dest, timeout=self.download_timeout)
-        except FetchError as exc:
-            self.store.set_fetch_error(rid, {'reason': exc.reason, 'url': exc.url, 'http_status': exc.status})
-            return
-        self.store.record_downloaded_pdf(rid, {**info, 'oa_status': oa.get('status'), 'license': oa.get('license')})
-
-    def set_match(self, rid, body):
-        """Confirm the current match, mark the paper as absent, or re-resolve from an identifier."""
-        paper = self.paper(rid)
-        action = body.get('action')
-        with self._paper_locks[rid]:
-            match = self.store.match(rid)
-            if action == 'confirm':
-                if not match or match.get('status') != 'matched':
-                    raise HttpError(400, 'nothing to confirm')
-                self.store.set_match(rid, {**match, 'confirmed': True, 'confirmed_at': now()})
-                return self.detail(rid)
-            if action == 'none':
-                self.store.set_match(rid, {'status': 'none', 'confirmed': True, 'resolved_at': now()})
-                self.store.discard_downloaded_pdf(rid)
-                self.store.set_fetch_error(rid, {'reason': 'Marked as not in Semantic Scholar.'})
-                return self.detail(rid)
-            if action != 'identifier':
-                raise HttpError(400, 'action must be confirm, none or identifier')
-            s2_id = parse_identifier(str(body.get('identifier', '')))
-            if not s2_id:
-                raise HttpError(400, 'Enter a DOI, PubMed id/URL, arXiv id or Semantic Scholar URL.')
-            try:
-                new = resolve(self.s2, paper, identifier=s2_id)
-            except S2Error as exc:
-                raise HttpError(502, str(exc))
-            if new['status'] != 'matched':
-                raise HttpError(404, f'Semantic Scholar has no paper for {s2_id}.')
-            self.store.set_match(rid, new)
-            if self.store.discard_downloaded_pdf(rid):
-                self._download(rid, new)
-        return self.detail(rid)
 
     def save_record(self, rid, body):
         self.paper(rid)
@@ -201,17 +100,20 @@ class App:
         fields = {'status': status, 'reviewer': self.store.settings().get('reviewer', ''),
                   'config_version': form['version'], 'config_hash': form['hash'], 'values': values}
         try:
-            return self.store.put_record(rid, int(body.get('rev', 0)), fields)
+            rev = int(body.get('rev', 0))
+        except (TypeError, ValueError):
+            raise HttpError(400, 'rev must be an integer')
+        try:
+            return self.store.put_record(rid, rev, fields)
         except Conflict as exc:
             raise HttpError(409, 'This paper was saved from another tab or window.', {'current': exc.current})
 
     def export(self, ids):
         form = self.form()
-        papers = [p for p in self.papers if not ids or p['record_id'] in ids]
+        papers = [p for p in self.papers if ids is None or p['record_id'] in ids]
         records = {p['record_id']: self.store.record(p['record_id']) for p in papers}
-        matches = {p['record_id']: self.store.match(p['record_id']) for p in papers}
         pdfs = {p['record_id']: self.store.pdf_info(p['record_id']) for p in papers}
-        return export_csv(form, papers, records, matches, pdfs, self.screening_columns)
+        return export_csv(form, papers, records, pdfs)
 
 
 ROUTES = []
@@ -320,8 +222,7 @@ def get_config(h):
 
 @route('GET', r'/api/settings')
 def get_settings(h):
-    h.json({**h.app.store.settings(), 'has_api_key': h.app.has_key, 'api_key_rejected': h.app.s2.key_rejected,
-            'statuses': STATUSES})
+    h.json({**h.app.store.settings(), 'statuses': STATUSES})
 
 
 @route('PUT', r'/api/settings')
@@ -342,16 +243,6 @@ def list_papers(h):
 @route('GET', r'/api/papers/(?P<rid>[^/]+)')
 def get_paper(h, rid):
     h.json(h.app.detail(rid))
-
-
-@route('POST', r'/api/papers/(?P<rid>[^/]+)/fetch')
-def fetch_paper(h, rid):
-    h.json(h.app.fetch(rid, retry=h.query.get('retry') == '1'))
-
-
-@route('POST', r'/api/papers/(?P<rid>[^/]+)/match')
-def set_match(h, rid):
-    h.json(h.app.set_match(rid, h.body_json()))
 
 
 @route('GET', r'/api/papers/(?P<rid>[^/]+)/pdf')
@@ -397,7 +288,7 @@ def put_record(h, rid):
 
 @route('GET', r'/api/export\.csv')
 def get_export(h):
-    ids = set(filter(None, h.query.get('ids', '').split(',')))
+    ids = set(filter(None, h.query['ids'].split(','))) if 'ids' in h.query else None
     stamp = datetime.now().strftime('%Y%m%d-%H%M')
     h.send(200, h.app.export(ids).encode('utf-8'), 'text/csv; charset=utf-8',
            {'Content-Disposition': f'attachment; filename="extraction_{stamp}.csv"'})
@@ -427,13 +318,13 @@ def main():
     server = ThreadingHTTPServer((host, port), Handler)
     server.daemon_threads = True
     print(f'{len(app.papers)} papers loaded; data in {app.store.root}')
-    if not app.has_key:
-        print('No Semantic Scholar API key found; using the shared, heavily rate-limited pool.')
     print(f'Open http://{host}:{port}')
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
+    finally:
+        server.server_close()
 
 
 if __name__ == '__main__':

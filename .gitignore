@@ -1,5 +1,12 @@
-# cached papers (copyrighted) and extraction records
+# Local work
 data/
+exports/
+.venv/
 __pycache__/
 .pytest_cache/
 .DS_Store
+.secrets/
+.env
+.env.*
+*.xlsx
+extraction_*.csv

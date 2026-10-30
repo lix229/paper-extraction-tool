@@ -106,15 +106,13 @@ def hidden_values(config, values):
     return hidden
 
 
-def export_csv(config, papers, records, matches, pdfs, screening_columns):
-    """`records`, `matches` and `pdfs` map record_id -> stored dict (or None)."""
+def export_csv(config, papers, records, pdfs):
+    """`records` and `pdfs` map record_id -> stored dict (or None)."""
     group_ids = list(groups(config))
     sizes = {g: max([len((r or {}).get('values', {}).get(g) or []) for r in records.values()] + [1])
              for g in group_ids}
     base = (['record_id', 'title', 'authors', 'year', 'source_kind', 'doi', 'source_link']
-            + [f'screening_{c}' for c in screening_columns]
-            + ['s2_paper_id', 's2_match_method', 's2_match_confirmed',
-               'pdf_origin', 'pdf_oa_status', 'pdf_url', 'pdf_sha256',
+            + ['pdf_origin', 'pdf_filename', 'pdf_sha256',
                'reviewer', 'status', 'created_at', 'updated_at', 'config_version', 'config_hash',
                'applicable_sections', 'hidden_values'])
     columns = base + field_columns(config, sizes)
@@ -126,21 +124,14 @@ def export_csv(config, papers, records, matches, pdfs, screening_columns):
     for paper in papers:
         rid = paper['record_id']
         record = records.get(rid) or {}
-        match = matches.get(rid) or {}
         pdf = pdfs.get(rid) or {}
-        s2 = match.get('paper') or {}
         values = record.get('values') or {}
         row = {
             'record_id': rid, 'title': paper['title'], 'authors': paper['authors'], 'year': paper['year'],
             'source_kind': paper['source']['kind'], 'doi': paper['source'].get('doi', ''),
             'source_link': paper['source'].get('url') or '',
-            **{f'screening_{c}': paper['screening'].get(c, '') for c in screening_columns},
-            's2_paper_id': s2.get('paperId', ''),
-            's2_match_method': match.get('method', match.get('status', '')),
-            's2_match_confirmed': {True: 'yes', False: 'no'}.get(match.get('confirmed'), '') if match else '',
             'pdf_origin': pdf.get('origin', ''),
-            'pdf_oa_status': (s2.get('openAccessPdf') or {}).get('status') or '' if pdf.get('origin') == 'semantic_scholar' else '',
-            'pdf_url': pdf.get('final_url') or pdf.get('url') or '',
+            'pdf_filename': pdf.get('filename', ''),
             'pdf_sha256': pdf.get('sha256', ''),
             'reviewer': record.get('reviewer', ''),
             'status': record.get('status', 'Not started'),

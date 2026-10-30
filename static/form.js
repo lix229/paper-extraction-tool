@@ -84,8 +84,7 @@ export class FormView {
     const row = h('div', { class: 'frow', dataset: { field: field.id } },
       h('div', { class: 'flabel' },
         h('label', { id: labelId, for: inputId }, field.label, required),
-        field.help ? h('div', { class: 'help' }, field.help) : null,
-        this.screeningHint(field, holder, control)),
+        field.help ? h('div', { class: 'help' }, field.help) : null),
       h('div', { class: 'fcontrol' }, control.el));
     this.rows.push({ el: row, visible: () => parentVisible() && evaluate(field.show_if, scope()) });
     return row;
@@ -95,14 +94,6 @@ export class FormView {
     if (field.type === 'select' || field.type === 'multiselect') return this.choiceControl(field, holder, inputId, labelId);
     if (field.type === 'ref') return this.refControl(field, holder, inputId, labelId);
     return this.textControl(field, holder, inputId);
-  }
-
-  screeningHint(field, holder, control) {
-    const value = field.screening_hint && this.paper?.screening?.[field.screening_hint];
-    if (!value) return null;
-    const usable = field.options.includes(value) || field.missing.includes(value);
-    return h('div', { class: 'hint' }, `Screening: ${value} `,
-      usable ? h('button', { type: 'button', class: 'link', onclick: () => control.set(field.type === 'multiselect' ? [value] : value) }, 'Use') : null);
   }
 
   setValue(holder, key, value) {

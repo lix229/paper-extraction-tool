@@ -29,11 +29,11 @@ RAW = {
 }
 PAPERS = [
     {'record_id': 'R1', 'title': 'One', 'authors': 'A', 'year': '2024', 'abstract': '',
-     'source': {'kind': 'doi', 'doi': '10.1/x', 'url': 'https://doi.org/10.1/x'}, 'screening': {'decision': 'Include'}},
+     'source': {'kind': 'doi', 'doi': '10.1/x', 'url': 'https://doi.org/10.1/x'}},
     {'record_id': 'R2', 'title': '=Formula title', 'authors': 'B', 'year': '2025', 'abstract': '',
-     'source': {'kind': 'missing', 'url': None}, 'screening': {'decision': 'Include'}},
+     'source': {'kind': 'missing', 'url': None}},
     {'record_id': 'R3', 'title': 'Untouched', 'authors': 'C', 'year': '2023', 'abstract': '',
-     'source': {'kind': 'pmid', 'url': 'https://pubmed.ncbi.nlm.nih.gov/1/'}, 'screening': {'decision': 'Include'}},
+     'source': {'kind': 'pmid', 'url': 'https://pubmed.ncbi.nlm.nih.gov/1/'}},
 ]
 
 
@@ -44,7 +44,7 @@ def rows(text):
 
 def build(records):
     config = normalize(RAW)
-    return rows(export_csv(config, PAPERS, records, {}, {}, ['decision']))
+    return rows(export_csv(config, PAPERS, records, {}))
 
 
 def test_one_row_per_paper_with_numbered_group_columns():
@@ -85,7 +85,7 @@ def test_group_columns_sized_to_largest_and_at_least_one():
 def test_numbers_are_not_escaped():
     raw = {'sections': [{'id': 's', 'fields': [{'id': 'n', 'type': 'number'}, {'id': 't', 'type': 'text'}]}]}
     config = normalize(raw)
-    text = export_csv(config, PAPERS[:1], {'R1': {'values': {'n': -3.5, 't': '+44 20'}}}, {}, {}, [])
+    text = export_csv(config, PAPERS[:1], {'R1': {'values': {'n': -3.5, 't': '+44 20'}}}, {})
     row = rows(text)[0]
     assert row['n'] == '-3.5' and row['t'] == "'+44 20"
 

@@ -4,13 +4,13 @@ import { Viewer } from './viewer.js';
 
 const $ = (sel) => document.querySelector(sel);
 const STATUS_CLASS = { 'Not started': 'st-none', 'In progress': 'st-progress', 'Needs review': 'st-review', Complete: 'st-done' };
-const PDF_BADGE = { cached: ['PDF', 'ok'], manual: ['PDF (added)', 'ok'], failed: ['No PDF', 'bad'], none: ['Not fetched', 'muted'] };
+const PDF_BADGE = { available: ['PDF', 'ok'], missing: ['No PDF', 'bad'] };
 const SPLIT_KEY = 'extraction.split';
 const LIST_KEY = 'extraction.listOpen';
 
 const state = {
   config: null, settings: null, papers: [], rows: new Map(),
-  current: null, detail: null, record: null, fetches: new Map(),
+  current: null, detail: null, record: null,
 };
 let form;
 let viewer;
@@ -122,16 +122,14 @@ function renderList() {
 }
 
 function fillRow(li, p) {
-  const [pdfText, pdfClass] = PDF_BADGE[p.pdf] || PDF_BADGE.none;
+  const [pdfText, pdfClass] = PDF_BADGE[p.pdf] || PDF_BADGE.missing;
   li.replaceChildren(h('button', {
     type: 'button', class: 'prow', 'aria-current': p.record_id === state.current ? 'true' : null,
     onclick: () => { openPaper(p.record_id); if (window.innerWidth < 1200) toggleList(false); },
   },
   h('span', { class: `dot ${STATUS_CLASS[p.status] || ''}`, title: p.status }),
   h('span', { class: 'ptitle' }, p.title),
-  h('span', { class: 'pmeta' }, [p.year, p.aspect].filter(Boolean).join(' · '), ' ',
-    h('span', { class: `badge ${pdfClass}` }, pdfText),
-    p.match_unconfirmed ? h('span', { class: 'badge warn', title: 'Semantic Scholar match needs checking' }, 'Check match') : null)));
+  h('span', { class: 'pmeta' }, p.year, ' ', h('span', { class: `badge ${pdfClass}` }, pdfText))));
 }
 
 function updateRow(partial) {
@@ -147,8 +145,7 @@ function matchesFilter(p) {
   const f = $('#filter').value;
   if (q && ![p.title, p.authors, p.record_id, p.source_label].join(' ').toLowerCase().includes(q)) return false;
   if (f === 'all') return true;
-  if (f === 'no-pdf') return p.pdf === 'failed' || p.pdf === 'none';
-  if (f === 'check-match') return p.match_unconfirmed || p.match === 'not_found';
+  if (f === 'no-pdf') return p.pdf === 'missing';
   return p.status === f;
 }
 
@@ -216,40 +213,10 @@ async function openPaper(rid) {
   state.record = detail.record || { rev: 0, status: 'Not started', values: {} };
   setSaveState(detail.record ? 'saved' : '', detail.record?.updated_at);
   renderHead();
-  renderScreening();
+  renderAbstract();
   renderStatus();
   form.load(detail.paper, state.record.values);
   viewer.show(detail);
-  const { pdf, match } = detail;
-  const shouldFetch = !pdf.available && (!pdf.error || pdf.error.transient) && match?.status !== 'none';
-  if (shouldFetch || state.fetches.has(rid)) fetchPaper(rid).catch((err) => toast(err.message, 'error'));
-}
-
-function fetchPaper(rid, retry = false) {
-  if (!state.fetches.has(rid)) {
-    const request = api(`/api/papers/${encodeURIComponent(rid)}/fetch${retry ? '?retry=1' : ''}`, { method: 'POST' })
-      .then((detail) => {
-        updateRow(detail.summary);
-        if (state.current === rid) applyDetail(detail);
-        if (detail.s2_key_rejected) warnKeyRejected();
-        return detail;
-      })
-      .catch((err) => {
-        if (state.current === rid) viewer.show(state.detail);
-        throw err;
-      })
-      .finally(() => state.fetches.delete(rid));
-    state.fetches.set(rid, request);
-  }
-  if (state.current === rid) viewer.show(state.detail, { fetching: true });
-  return state.fetches.get(rid);
-}
-
-let keyWarned = false;
-function warnKeyRejected() {
-  if (keyWarned) return;
-  keyWarned = true;
-  toast('Semantic Scholar rejected the API key, so lookups use the shared, rate-limited pool. Check SEMANTIC_SCHOLAR_API_KEY.', 'warn', 10000);
 }
 
 function applyDetail(detail) {
@@ -258,7 +225,7 @@ function applyDetail(detail) {
   viewer.show(detail);
 }
 
-// ---------- paper header and match ----------
+// ---------- paper header ----------
 
 function shortAuthors(authors) {
   const list = authors.split(';').map((a) => a.trim()).filter(Boolean);
@@ -266,85 +233,26 @@ function shortAuthors(authors) {
 }
 
 function renderHead() {
-  const { paper, match, pdf } = state.detail;
-  const s2 = match?.paper;
-  const links = [
-    paper.source.url ? h('a', { href: paper.source.url, target: '_blank', rel: 'noopener' }, `${paper.source.label} ↗`) : h('span', { class: 'badge warn' }, paper.source.label),
-    s2?.url ? h('a', { href: s2.url, target: '_blank', rel: 'noopener' }, 'Semantic Scholar ↗') : null,
-  ].filter(Boolean);
+  const { paper, pdf } = state.detail;
+  const source = paper.source.url
+    ? h('a', { href: paper.source.url, target: '_blank', rel: 'noopener' }, `${paper.source.label} ↗`)
+    : h('span', { class: 'muted' }, paper.source.label);
   $('#paper-head').replaceChildren(...[
     h('h1', {}, paper.title),
-    h('div', { class: 'meta' }, h('span', { title: paper.authors }, shortAuthors(paper.authors)), ` · ${paper.year} · `, h('code', {}, paper.record_id), ' · ',
-      links.flatMap((l, i) => (i ? [' · ', l] : [l]))),
-    matchBanner(match),
-    pdfBadge(pdf, s2),
+    h('div', { class: 'meta' }, h('span', { title: paper.authors }, shortAuthors(paper.authors)),
+      ` · ${paper.year} · `, h('code', {}, paper.record_id), ' · ', source),
+    pdf.origin === 'manual'
+      ? h('div', { class: 'source-note' }, `PDF: ${pdf.filename || 'uploaded document'}`) : null,
   ].filter(Boolean));
-}
-
-function matchBanner(match) {
-  if (!match) return null;
-  const change = h('button', { type: 'button', class: 'small', onclick: changeMatch }, 'Use another identifier…');
-  if (match.status === 'not_found') {
-    return h('div', { class: 'banner warn' }, `Not found in Semantic Scholar (tried ${match.tried.join(', ')}). `, change,
-      h('button', { type: 'button', class: 'small', onclick: () => postMatch({ action: 'none' }) }, 'Mark as not in Semantic Scholar'));
-  }
-  if (match.status === 'none') return h('div', { class: 'banner' }, 'Marked as not in Semantic Scholar. ', change);
-  if (match.confirmed) return null;
-  const s2 = match.paper;
-  const first = s2.authors?.[0]?.name;
-  const how = { title: 'title search', doi: 'DOI', pmid: 'PubMed id', manual: 'the identifier you entered' }[match.method] || match.method;
-  return h('div', { class: 'banner warn' },
-    h('div', {}, `Matched by ${how}; title similarity ${Math.round(match.similarity * 100)}%. Is this the paper? `,
-      h('strong', {}, `“${s2.title}”`), ` (${[s2.year, first].filter(Boolean).join(', ')}${s2.venue ? `, ${s2.venue}` : ''})`),
-    h('div', { class: 'row' },
-      h('button', { type: 'button', class: 'small primary', onclick: () => postMatch({ action: 'confirm' }) }, 'Yes, confirm'),
-      change,
-      h('button', { type: 'button', class: 'small', onclick: () => postMatch({ action: 'none' }) }, 'Not in Semantic Scholar')));
-}
-
-function pdfBadge(pdf, s2) {
-  if (!pdf.available) return null;
-  if (pdf.origin === 'manual') return h('div', { class: 'source-note' }, `PDF added by hand${pdf.filename ? ` (${pdf.filename})` : ''}.`);
-  const host = (() => { try { return new URL(pdf.final_url || pdf.url).host; } catch { return ''; } })();
-  const oa = pdf.oa_status || s2?.openAccessPdf?.status;
-  const note = h('div', { class: 'source-note' }, `Open-access PDF${oa ? ` (${oa})` : ''} from ${host}.`);
-  if (oa === 'GREEN') {
-    note.append(h('span', { class: 'badge warn' }, 'Repository/preprint copy: page numbers may differ from the published article'));
-  }
-  return note;
-}
-
-async function postMatch(body) {
-  const rid = state.current;
-  try {
-    const detail = await api(`/api/papers/${encodeURIComponent(rid)}/match`, { method: 'POST', body });
-    updateRow(detail.summary);
-    if (state.current === rid) applyDetail(detail);
-  } catch (err) {
-    toast(err.message, 'error');
-  }
-}
-
-async function changeMatch() {
-  const input = h('input', { type: 'text', class: 'wide', placeholder: '10.1000/xyz, PubMed URL, arXiv id or semanticscholar.org link' });
-  const ok = await modal({
-    title: 'Match a different Semantic Scholar paper',
-    body: [h('p', {}, 'Paste a DOI, PubMed id or URL, arXiv id, or a Semantic Scholar paper link. A PDF added by hand is kept; a downloaded one is replaced.'), input],
-    actions: [{ label: 'Cancel', value: false }, { label: 'Look up', value: true, primary: true }],
-  });
-  if (ok && input.value.trim()) await postMatch({ action: 'identifier', identifier: input.value.trim() });
 }
 
 // ---------- form side ----------
 
-function renderScreening() {
+function renderAbstract() {
   const { paper } = state.detail;
-  const rows = Object.entries(paper.screening).filter(([, v]) => v);
-  const brief = ['review_aspect', 'publication_type', 'country'].map((k) => paper.screening[k]).filter(Boolean).join(' · ');
-  $('#screening').replaceChildren(h('details', { class: 'screening' },
-    h('summary', {}, 'Original screening (workbook)', brief ? h('span', { class: 'muted' }, ` — ${brief}`) : null),
-    h('table', {}, h('tbody', {}, rows.map(([k, v]) => h('tr', {}, h('th', {}, k.replaceAll('_', ' ')), h('td', {}, v))))),
-    paper.abstract ? h('details', { class: 'abstract' }, h('summary', {}, 'Abstract'), h('p', {}, paper.abstract)) : null));
+  $('#paper-abstract').replaceChildren(...(paper.abstract ? [
+    h('details', { class: 'abstract' }, h('summary', {}, 'Abstract'), h('p', {}, paper.abstract)),
+  ] : []));
 }
 
 function renderStatus() {
@@ -398,7 +306,7 @@ async function upload(kind, file) {
     applyDetail(detail);
     if (kind === 'main') {
       viewer.open('main');
-      toast('PDF saved to the cache.');
+      toast('PDF saved.');
     } else {
       const added = detail.supplements.find((s) => !before.has(s.name));
       if (added) viewer.open(added.name);
@@ -512,45 +420,6 @@ async function exportCsv() {
   download(`/api/export.csv${ids ? `?ids=${encodeURIComponent(ids)}` : ''}`);
 }
 
-async function fetchMissing() {
-  const untried = state.papers.filter((p) => p.pdf === 'none');
-  const failed = state.papers.filter((p) => p.pdf === 'failed');
-  const retry = h('input', { type: 'checkbox' });
-  const go = await modal({
-    title: 'Fetch missing PDFs',
-    body: [
-      h('p', {}, `${untried.length} paper${untried.length === 1 ? ' has' : 's have'} not been tried yet. Semantic Scholar allows one request a second, so this takes a few seconds per paper.`),
-      failed.length ? h('label', { class: 'check' }, retry, ` Also retry the ${failed.length} that failed before`) : null,
-    ],
-    actions: [{ label: 'Cancel', value: false }, { label: 'Start', value: true, primary: true }],
-  });
-  if (!go) return;
-  const queue = retry.checked ? [...untried, ...failed] : untried;
-  if (!queue.length) return toast('Nothing to fetch.');
-  let cancelled = false;
-  const bar = h('progress', { max: queue.length, value: 0 });
-  const line = h('p', { class: 'muted' });
-  const overlay = h('div', { class: 'overlay' }, h('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Fetching PDFs' },
-    h('h3', {}, 'Fetching PDFs'), bar, line,
-    h('div', { class: 'modal-actions' }, h('button', { type: 'button', onclick: () => { cancelled = true; line.textContent = 'Stopping after this paper…'; } }, 'Stop'))));
-  $('#modal-root').append(overlay);
-  let got = 0;
-  let missed = 0;
-  for (const [i, p] of queue.entries()) {
-    if (cancelled) break;
-    line.textContent = `${i + 1} of ${queue.length}: ${p.title}`;
-    try {
-      const detail = await fetchPaper(p.record_id, p.pdf === 'failed');
-      detail.pdf.available ? got++ : missed++;
-    } catch {
-      missed++;
-    }
-    bar.value = i + 1;
-  }
-  overlay.remove();
-  toast(`${got} PDF${got === 1 ? '' : 's'} downloaded, ${missed} without a PDF${cancelled ? ' (stopped early)' : ''}. Filter the list by “No PDF” to add the rest by hand.`, 'info', 8000);
-}
-
 function showConfigErrors(err) {
   document.body.replaceChildren(h('main', { class: 'config-errors' },
     h('h1', {}, 'form.yaml has errors'),
@@ -575,7 +444,7 @@ async function init() {
 
   viewer = new Viewer({
     tabs: $('#file-tabs'), stage: $('#viewer-stage'),
-    actions: { upload, retry: () => fetchPaper(state.current, true).catch((err) => toast(err.message, 'error')) },
+    actions: { upload },
   });
   form = new FormView({ body: $('#form-body'), nav: $('#section-nav'), scroller: $('#form-scroll'), viewer, onChange: onFormChange });
   form.setConfig(state.config);
@@ -586,7 +455,6 @@ async function init() {
   $('#search').addEventListener('input', applyFilter);
   $('#filter').addEventListener('change', applyFilter);
   $('#export').addEventListener('click', exportCsv);
-  $('#fetch-missing').addEventListener('click', fetchMissing);
   $('#reviewer').addEventListener('click', () => askReviewer(false));
   window.addEventListener('hashchange', () => {
     const rid = decodeURIComponent(location.hash.slice(2));
@@ -596,8 +464,6 @@ async function init() {
   renderList();
   toggleList(store.get(LIST_KEY) === '1');
   if (!state.settings.reviewer) await askReviewer(true);
-  if (!state.settings.has_api_key) toast('No Semantic Scholar API key found; lookups use the shared, rate-limited pool.', 'warn', 8000);
-  if (state.settings.api_key_rejected) warnKeyRejected();
 
   const fromHash = decodeURIComponent(location.hash.slice(2));
   const start = [fromHash, store.get('extraction.last')].find((rid) => state.rows.has(rid)) || state.papers[0]?.record_id;

@@ -1,4 +1,4 @@
-// Left pane: the PDF.js viewer for the cached PDF and supplements, or a fallback panel.
+// Left pane: the PDF.js viewer and supplementary documents.
 import { h, modal } from './dom.js';
 
 const VIEWER = '/static/vendor/pdfjs/web/viewer.html';
@@ -14,7 +14,7 @@ document.addEventListener('webviewerloaded', (e) => {
   opts.set('disableHistory', true);
   opts.set('defaultZoomValue', 'page-width');
   opts.set('sidebarViewOnLoad', 0);
-  opts.set('annotationEditorMode', -1); // read-only: edits would never reach the cached file
+  opts.set('annotationEditorMode', -1); // read-only: evidence is recorded in the form
 });
 
 export class Viewer {
@@ -26,7 +26,7 @@ export class Viewer {
     this.src = null;
   }
 
-  show(detail, { fetching = false } = {}) {
+  show(detail) {
     if (detail.paper.record_id !== this.rid) {
       this.rid = detail.paper.record_id;
       this.file = 'main';
@@ -34,9 +34,9 @@ export class Viewer {
     this.detail = detail;
     const files = this.files();
     if (!files.some((f) => f.key === this.file)) this.file = files[0]?.key ?? 'main';
-    this.renderTabs(files, fetching);
+    this.renderTabs(files);
     const file = files.find((f) => f.key === this.file);
-    if (fetching || !file) this.renderPanel(fetching);
+    if (!file) this.renderPanel();
     else this.load(file);
   }
 
@@ -53,7 +53,7 @@ export class Viewer {
     const file = this.files().find((f) => f.key === key);
     if (!file) return false;
     this.file = key;
-    this.renderTabs(this.files(), false);
+    this.renderTabs(this.files());
     this.load(file, page);
     return true;
   }
@@ -67,7 +67,7 @@ export class Viewer {
     this.stage.replaceChildren(this.iframe);
   }
 
-  renderTabs(files, fetching) {
+  renderTabs(files) {
     const has = (key) => files.some((f) => f.key === key);
     const picker = (kind, label) => {
       const input = h('input', { type: 'file', accept: 'application/pdf,.pdf', hidden: true,
@@ -79,32 +79,21 @@ export class Viewer {
         h('button', { type: 'button', role: 'tab', 'aria-selected': String(f.key === this.file), class: 'tab', onclick: () => this.open(f.key) },
           f.key === 'main' ? f.label : `Suppl. ${f.label}`))),
       h('div', { class: 'file-actions' },
-        has('main') ? picker('main', 'Replace PDF…') : null,
-        picker('supplement', 'Add supplement…'),
-        !has('main') && !fetching ? h('button', { type: 'button', class: 'small', onclick: () => this.actions.retry() }, 'Retry download') : null),
+        picker('main', has('main') ? 'Replace PDF…' : 'Add PDF…'),
+        picker('supplement', 'Add supplement…')),
     );
   }
 
-  renderPanel(fetching) {
+  renderPanel() {
     this.iframe = null;
     this.src = null;
-    const { paper, pdf, match } = this.detail;
-    const err = pdf.error;
-    let status;
-    if (fetching) {
-      status = h('div', { class: 'state busy' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }),
-        'Looking the paper up in Semantic Scholar and downloading its open-access PDF…');
-    } else if (err) {
-      status = h('div', { class: 'state error' }, h('strong', {}, 'No PDF yet. '), err.reason,
-        err.url ? [' ', h('a', { href: err.url, target: '_blank', rel: 'noopener' }, 'Link tried ↗')] : null);
-    } else {
-      status = h('div', { class: 'state' }, 'No PDF cached yet.');
-    }
+    const { paper, pdf } = this.detail;
+    const status = h('div', { class: 'state error' }, pdf.error?.reason || 'Add a PDF to read this paper.');
     const input = h('input', { type: 'file', accept: 'application/pdf,.pdf', hidden: true,
       onchange: () => input.files[0] && this.actions.upload('main', input.files[0]) });
     const drop = h('label', { class: 'dropzone' }, input,
       h('strong', {}, 'Drop the PDF here'), ' or ', h('span', { class: 'linkish' }, 'choose a file'),
-      h('small', {}, 'Download it with your library access, then add it here. It is saved to the local cache.'));
+      h('small', {}, 'The PDF is saved with your local work.'));
     drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
     drop.addEventListener('dragleave', () => drop.classList.remove('over'));
     drop.addEventListener('drop', (e) => {
@@ -113,18 +102,14 @@ export class Viewer {
       const file = e.dataTransfer.files[0];
       if (file) this.actions.upload('main', file);
     });
-    // an unconfirmed match may be a different paper, so only trust its text once confirmed
-    const s2 = match?.confirmed ? match.paper || {} : {};
-    const abstract = paper.abstract || s2.abstract;
     this.stage.replaceChildren(h('div', { class: 'fallback' },
       status,
       paper.source.url ? h('p', {}, h('a', { class: 'button', href: paper.source.url, target: '_blank', rel: 'noopener' }, 'Open publisher page ↗')) : null,
-      fetching ? null : drop,
-      s2.tldr?.text ? h('section', {}, h('h3', {}, 'TL;DR (Semantic Scholar)'), h('p', {}, s2.tldr.text)) : null,
-      abstract ? h('section', {}, h('h3', {}, 'Abstract'), h('p', {}, abstract)) : null));
+      drop,
+      paper.abstract ? h('section', {}, h('h3', {}, 'Abstract'), h('p', {}, paper.abstract)) : null));
   }
 
-  // PDF.js opens dropped files itself; route them to the cache instead.
+  // PDF.js opens dropped files itself; save them with the local work instead.
   interceptDrops() {
     const win = this.iframe?.contentWindow;
     if (!win) return;

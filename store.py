@@ -1,26 +1,20 @@
-"""On-disk storage: the paper cache and the extraction records.
-
-data/
-  cache/<record_id>/s2.json            Semantic Scholar match
-  cache/<record_id>/paper.pdf          main PDF (downloaded or added by hand)
-  cache/<record_id>/pdf.json           where the PDF came from, sha256, size, time
-  cache/<record_id>/fetch_error.json   last failed download, cleared on success
-  cache/<record_id>/supplements/*.pdf  supplementary files added by hand
-  extractions/<record_id>.json         extraction record
-  settings.json                        reviewer name
-"""
+"""Publication PDFs, local uploads, extraction records, and reviewer settings."""
 import hashlib
 import json
 import os
 import re
 import tempfile
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 
 from papers import RECORD_ID_RE
-from s2 import looks_like_pdf, now
 
 SUPPLEMENT_NAME_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9 ._()-]{0,99}\.pdf$')
+
+
+def now():
+    return datetime.now(timezone.utc).isoformat(timespec='seconds')
 
 
 class Conflict(Exception):
@@ -55,48 +49,37 @@ def safe_supplement_name(filename):
 
 
 class Store:
-    def __init__(self, data_dir):
+    def __init__(self, data_dir, papers_dir=None, papers=()):
         self.root = Path(data_dir)
         self.cache = self.root / 'cache'
         self.extractions = self.root / 'extractions'
+        self.papers_dir = Path(papers_dir) if papers_dir is not None else None
+        self.bundled = {p['record_id']: {'origin': 'bundled', 'filename': p['record_id'] + '.pdf',
+                                      'sha256': p['pdf_sha256'], 'bytes': p['pdf_bytes']} for p in papers}
         self._lock = threading.Lock()
 
     def _dir(self, record_id):
-        if not RECORD_ID_RE.match(record_id):
+        if not RECORD_ID_RE.fullmatch(record_id) or record_id in ('.', '..'):
             raise ValueError(f'bad record id {record_id!r}')
         return self.cache / record_id
-
-    # Semantic Scholar match
-
-    def match(self, record_id):
-        return read_json(self._dir(record_id) / 's2.json')
-
-    def set_match(self, record_id, match):
-        write_json(self._dir(record_id) / 's2.json', match)
 
     # main PDF
 
     def pdf_path(self, record_id):
-        return self._dir(record_id) / 'paper.pdf'
+        local = self._dir(record_id) / 'paper.pdf'
+        if local.is_file() or self.papers_dir is None:
+            return local
+        return self.papers_dir / (record_id + '.pdf')
 
     def pdf_info(self, record_id):
         if not self.pdf_path(record_id).is_file():
             return None
-        return read_json(self._dir(record_id) / 'pdf.json', {'origin': 'unknown'})
-
-    def fetch_error(self, record_id):
-        return read_json(self._dir(record_id) / 'fetch_error.json')
-
-    def set_fetch_error(self, record_id, error):
-        write_json(self._dir(record_id) / 'fetch_error.json', {**error, 'at': now()})
-
-    def record_downloaded_pdf(self, record_id, info):
-        """Call after download_pdf() has written paper.pdf."""
-        write_json(self._dir(record_id) / 'pdf.json', {'origin': 'semantic_scholar', **info})
-        (self._dir(record_id) / 'fetch_error.json').unlink(missing_ok=True)
+        if (self._dir(record_id) / 'paper.pdf').is_file():
+            return read_json(self._dir(record_id) / 'pdf.json', {'origin': 'unknown'})
+        return self.bundled.get(record_id, {'origin': 'bundled', 'filename': record_id + '.pdf'})
 
     def save_uploaded_pdf(self, record_id, data, filename):
-        if not looks_like_pdf(data[:1024]):
+        if not data[:1024].lstrip().startswith(b'%PDF-'):
             raise InvalidPdf('That file is not a PDF.')
         folder = self._dir(record_id)
         folder.mkdir(parents=True, exist_ok=True)
@@ -106,18 +89,7 @@ class Store:
         info = {'origin': 'manual', 'filename': filename, 'sha256': hashlib.sha256(data).hexdigest(),
                 'bytes': len(data), 'fetched_at': now()}
         write_json(folder / 'pdf.json', info)
-        (folder / 'fetch_error.json').unlink(missing_ok=True)
         return info
-
-    def discard_downloaded_pdf(self, record_id):
-        """Drop a downloaded PDF and any failure (after the match changes). Manual PDFs stay."""
-        info = self.pdf_info(record_id)
-        if info and info.get('origin') == 'manual':
-            return False
-        folder = self._dir(record_id)
-        for name in ('paper.pdf', 'pdf.json', 'fetch_error.json'):
-            (folder / name).unlink(missing_ok=True)
-        return True
 
     # supplements
 
@@ -133,7 +105,7 @@ class Store:
         return self._dir(record_id) / 'supplements' / name
 
     def save_supplement(self, record_id, data, filename):
-        if not looks_like_pdf(data[:1024]):
+        if not data[:1024].lstrip().startswith(b'%PDF-'):
             raise InvalidPdf('That file is not a PDF.')
         name = safe_supplement_name(filename)
         path = self.supplement_path(record_id, name)

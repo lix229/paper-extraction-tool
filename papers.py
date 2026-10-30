@@ -1,9 +1,8 @@
-"""Load the paper list from the screening workbook and classify each source link."""
+"""Load publication details from the paper manifest."""
+import json
 import re
 from pathlib import Path
 from urllib.parse import quote
-
-import openpyxl
 
 DOI_RE = re.compile(r'^10\.\d{4,9}/\S+$')
 DOI_PREFIX_RE = re.compile(r'^(?:https?://(?:dx\.)?doi\.org/|doi:\s*)', re.I)
@@ -11,15 +10,8 @@ PUBMED_RE = re.compile(r'pubmed\.ncbi\.nlm\.nih\.gov/(\d+)')
 RECORD_ID_RE = re.compile(r'^[A-Za-z0-9._-]{1,80}$')
 
 
-def header_key(header):
-    """Workbook headers look like 'review_aspect: What part of…'; keep the part before ':'."""
-    return str(header).split(':', 1)[0].strip() if header is not None else ''
-
-
 def clean(value):
-    if value is None:
-        return ''
-    return str(value).strip()
+    return '' if value is None else str(value).strip()
 
 
 def normalize_doi(text):
@@ -28,55 +20,52 @@ def normalize_doi(text):
 
 
 def parse_source(raw):
-    """Classify the workbook's DOI cell: a DOI string, a PubMed URL, another URL or blank."""
     raw = clean(raw)
     if not raw:
-        return {'kind': 'missing', 'raw': '', 'url': None, 's2_id': None, 'label': 'No DOI'}
+        return {'kind': 'missing', 'raw': '', 'url': None, 'label': 'No DOI'}
     match = PUBMED_RE.search(raw)
     if match:
         pmid = match.group(1)
         return {'kind': 'pmid', 'raw': raw, 'url': f'https://pubmed.ncbi.nlm.nih.gov/{pmid}/',
-                's2_id': f'PMID:{pmid}', 'label': f'PubMed {pmid}'}
+                'label': f'PubMed {pmid}'}
     doi = normalize_doi(raw)
     if doi:
-        return {'kind': 'doi', 'raw': raw, 'doi': doi, 'url': 'https://doi.org/' + quote(doi, safe='/:;()._-'),
-                's2_id': f'DOI:{doi}', 'label': f'DOI {doi}'}
+        return {'kind': 'doi', 'raw': raw, 'doi': doi,
+                'url': 'https://doi.org/' + quote(doi, safe='/:;()._-'), 'label': f'DOI {doi}'}
     if raw.startswith(('http://', 'https://')):
-        return {'kind': 'url', 'raw': raw, 'url': raw, 's2_id': None, 'label': 'Source link'}
-    return {'kind': 'unknown', 'raw': raw, 'url': None, 's2_id': None, 'label': f'Unrecognised: {raw}'}
+        return {'kind': 'url', 'raw': raw, 'url': raw, 'label': 'Source link'}
+    return {'kind': 'unknown', 'raw': raw, 'url': None, 'label': raw}
 
 
-def load_papers(path, sheet, columns, screening):
-    """Read one paper per row. `columns` maps id/title/authors/year/doi/abstract to header keys."""
+def load_papers(path):
+    """Read the manifest, retaining publication fields and PDF checksums."""
     path = Path(path)
-    workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
-    if sheet not in workbook.sheetnames:
-        raise ValueError(f'{path.name}: no sheet named {sheet!r}')
-    rows = workbook[sheet].iter_rows(values_only=True)
-    keys = [header_key(h) for h in next(rows)]
-    absent = [c for c in [*columns.values(), *screening] if c not in keys]
-    if absent:
-        raise ValueError(f'{path.name}: missing columns {absent}')
-
+    entries = json.loads(path.read_text('utf-8'))
+    if not isinstance(entries, list) or not entries:
+        raise ValueError(f'{path.name}: expected a nonempty list of papers')
     papers, seen = [], set()
-    for row in rows:
-        cells = dict(zip(keys, row))
-        record_id = clean(cells.get(columns['id']))
-        if not record_id:
-            continue
-        if not RECORD_ID_RE.match(record_id):
-            raise ValueError(f'{path.name}: record id {record_id!r} must use letters, digits, ".", "_" or "-"')
-        if record_id in seen:
-            raise ValueError(f'{path.name}: duplicate record id {record_id}')
-        seen.add(record_id)
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ValueError(f'{path.name}: each paper must be an object')
+        rid = clean(entry.get('record_id'))
+        if not RECORD_ID_RE.fullmatch(rid) or rid in ('.', '..'):
+            raise ValueError(f'{path.name}: invalid record id {rid!r}')
+        if rid in seen:
+            raise ValueError(f'{path.name}: duplicate record id {rid}')
+        title = clean(entry.get('title'))
+        sha256 = clean(entry.get('pdf_sha256'))
+        size = entry.get('pdf_bytes')
+        if not title:
+            raise ValueError(f'{path.name}: {rid} needs a title')
+        if not re.fullmatch(r'[0-9a-f]{64}', sha256):
+            raise ValueError(f'{path.name}: {rid} needs a PDF SHA-256 checksum')
+        if type(size) is not int or size <= 0:
+            raise ValueError(f'{path.name}: {rid} needs a positive PDF size')
+        seen.add(rid)
         papers.append({
-            'record_id': record_id,
-            'title': clean(cells.get(columns['title'])),
-            'authors': clean(cells.get(columns['authors'])),
-            'year': clean(cells.get(columns['year'])),
-            'abstract': clean(cells.get(columns['abstract'])),
-            'source': parse_source(cells.get(columns['doi'])),
-            'screening': {c: clean(cells.get(c)) for c in screening},
+            'record_id': rid, 'title': title, 'authors': clean(entry.get('authors')),
+            'year': clean(entry.get('year')), 'abstract': clean(entry.get('abstract')),
+            'source': parse_source(entry.get('doi')),
+            'pdf_sha256': sha256, 'pdf_bytes': size,
         })
-    workbook.close()
     return papers

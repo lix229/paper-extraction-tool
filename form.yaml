@@ -20,7 +20,6 @@
 #   show_if: <condition>  shown only when true; hidden values are kept but
 #                         export blank
 #   required: true | <condition>   checked when the paper is marked Complete
-#   screening_hint: <column>       shows the workbook's screening value
 #   evidence: true        "Use page" / "Go to" buttons tied to the PDF viewer
 #   quote: true           "Insert selection" adds a labelled quotation
 # Conditions
@@ -76,7 +75,6 @@ sections:
         options: [Include, Exclude, Uncertain—needs discussion]
         missing: []
         required: true
-        screening_hint: decision
       - id: exclusion_reason
         label: Exclusion reason
         type: select
@@ -106,7 +104,6 @@ sections:
         options: &aspects [Research, "Translation & Adoption", "System & Governance"]
         missing: []
         required: true
-        screening_hint: review_aspect
       - id: aspect_additional
         label: Additional review aspects
         type: multiselect
@@ -124,8 +121,7 @@ sections:
         other: true
         missing: [Unclear]
         required: true
-        screening_hint: publication_type
-        help: Confirm the imported label.
+        help: Choose the publication type for this paper.
       - id: study_design
         label: Study design
         type: select

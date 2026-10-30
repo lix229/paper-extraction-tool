@@ -1,26 +1,10 @@
-# App settings. Paths are relative to this file. Restart the server after editing.
-
+# Paths are relative to this file. Restart the server after editing.
 papers:
-  file: ../included_papers_n63.xlsx
-  sheet: Articles
-  # Workbook header keys (the text before ":" in each header).
-  columns:
-    id: record_id
-    title: title
-    authors: authors
-    year: year
-    doi: doi            # DOI string, PubMed URL or blank
-    abstract: abstract
-  # Original screening columns: shown read-only and exported as screening_<column>.
-  screening: [review_aspect, country, publication_type, exclusion_reason, note_or_uncertainty, decision]
+  manifest: papers/manifest.json
+  directory: papers
 
-form: form.yaml       # re-read on every page load
-data_dir: data        # PDF cache and extraction records
-
-semantic_scholar:
-  api_key_env: SEMANTIC_SCHOLAR_API_KEY
-  min_interval: 1.1   # seconds between calls; keyed limit is 1 request/second
-  download_timeout: 30
+form: form.yaml
+data_dir: data
 
 server:
   host: 127.0.0.1

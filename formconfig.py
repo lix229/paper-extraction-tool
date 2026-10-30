@@ -14,7 +14,7 @@ CHOICE_TYPES = {'select', 'multiselect'}
 OTHER = 'Other'
 ID_RE = re.compile(r'^[a-z][a-z0-9_]*$')
 FIELD_KEYS = {'id', 'label', 'type', 'help', 'options', 'other', 'missing', 'show_if', 'required',
-              'screening_hint', 'evidence', 'quote', 'placeholder', 'fields', 'prefix', 'item_label',
+              'evidence', 'quote', 'placeholder', 'fields', 'prefix', 'item_label',
               'summary', 'group', 'multiple'}
 SECTION_KEYS = {'id', 'title', 'help', 'show_if', 'fields'}
 
@@ -213,8 +213,6 @@ class _Normalizer:
             out['other'] = bool(field.get('other'))
             if out['other'] and f'{fid}_other' in scope:
                 self.err(f'{where}: {fid}_other is reserved for the Other text')
-            hint = field.get('screening_hint')
-            out['screening_hint'] = hint if isinstance(hint, str) else None
         if ftype in {'select', 'multiselect', 'text', 'textarea', 'number'}:
             missing = field.get('missing')
             out['missing'] = list(self.raw.get('missing_default') or []) if missing is None else missing
